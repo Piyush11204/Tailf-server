@@ -1,13 +1,13 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { WebSocketServer } = require('ws'); // Optional: Replace with native WebSocket server if fully strict
+const { WebSocketServer } = require('ws'); 
 
 const PORT = 3000;
 const UPLOAD_DIR = './uploads';
 const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
 
-// Ensure uploads directory exists
+
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
@@ -33,7 +33,6 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// Native WebSocket Server without `socket.io`
 const clients = new Set();
 
 const wss = new WebSocketServer({ server });
@@ -52,11 +51,14 @@ wss.on('connection', (ws) => {
       }
 
       if (type === 'start-tail') {
-        // Send last N lines
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const allLines = content.split('\n').filter(Boolean);
-        const lastLines = allLines.slice(-lines);
-        ws.send(JSON.stringify({ type: 'initial-lines', lines: lastLines }));
+        // Efficiently send last N lines
+        getLastNLines(filePath, lines)
+          .then((lastLines) => {
+            ws.send(JSON.stringify({ type: 'initial-lines', lines: lastLines }));
+          })
+          .catch(() => {
+            ws.send(JSON.stringify({ type: 'error', message: 'Failed to read file' }));
+          });
 
         let lastSize = fs.statSync(filePath).size;
 
@@ -72,7 +74,7 @@ wss.on('connection', (ws) => {
             stream.on('data', (chunk) => {
               buffer += chunk;
               const newLines = buffer.split('\n');
-              buffer = newLines.pop(); // Keep incomplete line
+              buffer = newLines.pop();
 
               newLines.forEach(line => {
                 if (line.trim()) {
@@ -103,3 +105,32 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
+
+function getLastNLines(filePath, n) {
+  return new Promise((resolve, reject) => {
+    const CHUNK_SIZE = 64 * 1024; // 64 KB per read
+    const fileSize = fs.statSync(filePath).size;
+    let position = fileSize;
+    let buffer = '';
+    let lines = [];
+
+    const fd = fs.openSync(filePath, 'r');
+
+    while (position > 0 && lines.length <= n) {
+      const readSize = Math.min(CHUNK_SIZE, position);
+      position -= readSize;
+
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, position);
+      buffer = buf.toString() + buffer;
+
+      lines = buffer.split('\n');
+    }
+
+    fs.closeSync(fd);
+
+    // Return only last N non-empty lines
+    const lastLines = lines.filter(line => line.trim() !== '').slice(-n);
+    resolve(lastLines);
+  });
+}
