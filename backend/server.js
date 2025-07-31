@@ -108,12 +108,12 @@ server.listen(PORT, () => {
 
 function getLastNLines(filePath, n) {
   return new Promise((resolve, reject) => {
-    const CHUNK_SIZE = 64 * 1024; // 64 KB per read
+    const CHUNK_SIZE = 64 * 1024; 
     const fileSize = fs.statSync(filePath).size;
     let position = fileSize;
     let buffer = '';
     let lines = [];
-
+  
     const fd = fs.openSync(filePath, 'r');
 
     while (position > 0 && lines.length <= n) {
@@ -123,13 +123,11 @@ function getLastNLines(filePath, n) {
       const buf = Buffer.alloc(readSize);
       fs.readSync(fd, buf, 0, readSize, position);
       buffer = buf.toString() + buffer;
-
       lines = buffer.split('\n');
     }
 
     fs.closeSync(fd);
 
-    // Return only last N non-empty lines
     const lastLines = lines.filter(line => line.trim() !== '').slice(-n);
     resolve(lastLines);
   });
