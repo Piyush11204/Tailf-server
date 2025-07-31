@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tailf Server - Real-time Log Monitor</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css?family=Fira+Mono:400,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #22223b;
+            --secondary: #4a4e69;
+            --accent: #9a8c98;
+            --success: #38b000;
+            --error: #d90429;
+            --bg: #23272f;
+            --terminal-bg: #181a20;
+            --terminal-fg: #e0e0e0;
+            --border-radius: 10px;
+            --shadow: 0 4px 24px #0004;
+        }
+        html, body {
+            height: 100%;
+        }
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #23272f 0%, #22223b 100%);
+            color: var(--terminal-fg);
+            font-family: 'Fira Mono', 'Courier New', monospace;
+            margin: 0;
+        }
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            background: var(--primary);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 32px 36px 36px 36px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .header h1 {
+            font-size: 2.2em;
+            letter-spacing: 2px;
+            color: var(--accent);
+            margin-bottom: 8px;
+        }
+        .header p {
+            color: #bcbcbc;
+            font-size: 1.1em;
+        }
+        .controls, .file-list {
+            background: var(--secondary);
+            padding: 22px 20px 18px 20px;
+            border-radius: var(--border-radius);
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px #0002;
+        }
+        .controls h3, .file-list h3 {
+            margin-bottom: 14px;
+            color: var(--accent);
+            font-weight: 700;
+            font-size: 1.1em;
+        }
+        .file-list {
+            margin-bottom: 24px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid #35374a;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-item span {
+            font-size: 1em;
+            color: #e0e0e0;
+        }
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-family: inherit;
+            margin: 0 4px;
+            transition: background 0.2s;
+            box-shadow: 0 1px 4px #0002;
+        }
+        button:hover:not(:disabled) {
+            background: #c9ada7;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        input[type="file"], select, input[type="number"] {
+            background: #23272f;
+            color: #e0e0e0;
+            border: 1px solid #35374a;
+            padding: 8px 10px;
+            border-radius: 5px;
+            font-size: 1em;
+            margin: 0 6px 0 0;
+            font-family: inherit;
+            outline: none;
+            transition: border 0.2s;
+        }
+        input[type="file"]:focus, select:focus, input[type="number"]:focus {
+            border: 1.5px solid var(--accent);
+        }
+        .terminal {
+            background: var(--terminal-bg);
+            border: 1.5px solid #35374a;
+            border-radius: var(--border-radius);
+            height: 420px;
+            overflow-y: auto;
+            padding: 18px;
+            font-size: 1.08em;
+            line-height: 1.5;
+            margin-top: 10px;
+            font-family: 'Fira Mono', 'Courier New', monospace;
+            box-shadow: 0 2px 8px #0002;
+        }
+        .line {
+            border-bottom: 1px solid #23223b22;
+            padding: 3px 0;
+            color: #b8ffb8;
+            transition: background 0.5s;
+        }
+        .new-line {
+            background: #2a4a2a;
+            animation: highlight 1s ease-out;
+        }
+        @keyframes highlight {
+            from { background: #4a6a4a; }
+            to { background: #2a4a2a; }
+        }
+        .status {
+            padding: 12px 18px;
+            margin: 14px 0 0 0;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 600;
+            box-shadow: 0 1px 4px #0002;
+            letter-spacing: 0.5px;
+            display: inline-block;
+        }
+        .success {
+            background: #1a4a1a;
+            border: 1px solid #38b000;
+            color: #b8ffb8;
+        }
+        .error {
+            background: #4a1a1a;
+            border: 1px solid #d90429;
+            color: #ffb8b8;
+        }
+        @media (max-width: 700px) {
+            .container { padding: 10px; }
+            .controls, .file-list { padding: 12px 8px; }
+            .terminal { padding: 8px; font-size: 0.98em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Tailf Server</h1>
+            <p>Real-time log monitoring and file management</p>
+        </div>
+        
+        <div class="controls">
+            <h3>Upload File</h3>
+            <input type="file" id="fileInput" accept=".txt,.log,.json,.csv">
+            <button onclick="uploadFile()">Upload</button>
+            <button onclick="refreshFiles()">Refresh Files</button>
+        </div>
+        
+        <div class="file-list">
+            <h3>Available Files</h3>
+            <div id="filesList"></div>
+        </div>
+        
+        <div class="controls">
+            <h3>Tail Controls</h3>
+            <select id="fileSelect">
+                <option value="">Select a file...</option>
+            </select>
+            <input type="number" id="linesInput" value="10" min="1" max="100" placeholder="Lines to show">
+            <button id="startBtn" onclick="startTail()">Start Tail</button>
+            <button id="stopBtn" onclick="stopTail()" disabled>Stop Tail</button>
+            <button onclick="clearTerminal()">Clear</button>
+        </div>
+        
+        <div id="status"></div>
+        
+        <div class="terminal" id="terminal">
+            <div class="line">Ready to tail files...</div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const terminal = document.getElementById('terminal');
+        const fileSelect = document.getElementById('fileSelect');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        
+        let currentFile = null;
+        let isMonitoring = false;
+        
+        socket.on('connect', () => {
+            showStatus('Connected to server', 'success');
+            refreshFiles();
+        });
+        
+        socket.on('disconnect', () => {
+            showStatus('Disconnected from server', 'error');
+        });
+        
+        socket.on('initial-lines', (data) => {
+            clearTerminal();
+            data.lines.forEach(line => addLine(line));
+            scrollToBottom();
+        });
+        
+        socket.on('new-line', (data) => {
+            addLine(data.line, true);
+            scrollToBottom();
+        });
+        
+        socket.on('error', (data) => {
+            showStatus(`Error: ${data.message}`, 'error');
+        });
+        
+        socket.on('tail-stopped', (data) => {
+            showStatus(`Stopped monitoring ${data.filename}`, 'success');
+            stopTail();
+        });
+        
+        function addLine(text, isNew = false) {
+            const line = document.createElement('div');
+            line.className = isNew ? 'line new-line' : 'line';
+            line.textContent = `${new Date().toISOString()} | ${text}`;
+            terminal.appendChild(line);
+            
+            // Keep only last 1000 lines
+            if (terminal.children.length > 1000) {
+                terminal.removeChild(terminal.firstChild);
+            }
+        }
+        
+        function scrollToBottom() {
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function clearTerminal() {
+            terminal.innerHTML = '';
+        }
+        
+        function showStatus(message, type) {
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => status.innerHTML = '', 3500);
+        }
+        
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showStatus('Please select a file', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus(`File uploaded: ${result.filename}`, 'success');
+                    fileInput.value = '';
+                    refreshFiles();
+                } else {
+                    showStatus(result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Upload failed', 'error');
+            }
+        }
+        
+        async function refreshFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const data = await response.json();
+                
+                const filesList = document.getElementById('filesList');
+                const currentValue = fileSelect.value;
+                
+                fileSelect.innerHTML = '<option value="">Select a file...</option>';
+                filesList.innerHTML = '';
+                
+                data.files.forEach(file => {
+                    // Add to select
+                    const option = document.createElement('option');
+                    option.value = file;
+                    option.textContent = file;
+                    fileSelect.appendChild(option);
+                    
+                    // Add to file list
+                    const div = document.createElement('div');
+                    div.className = 'file-item';
+                    div.innerHTML = `
+                        <span>${file}</span>
+                        <button onclick="deleteFile('${file}')">Delete</button>
+                    `;
+                    filesList.appendChild(div);
+                });
+                
+                // Restore selection if still exists
+                if (currentValue && data.files.includes(currentValue)) {
+                    fileSelect.value = currentValue;
+                }
+                
+            } catch (error) {
+                showStatus('Failed to load files', 'error');
+            }
+        }
+        
+        async function deleteFile(filename) {
+            if (!confirm(`Delete ${filename}?`)) return;
+            
+            try {
+                const response = await fetch(`/api/files/${filename}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus(result.message, 'success');
+                    if (currentFile === filename) {
+                        stopTail();
+                    }
+                    refreshFiles();
+                } else {
+                    showStatus(result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Delete failed', 'error');
+            }
+        }
+        
+        function startTail() {
+            const filename = fileSelect.value;
+            const lines = parseInt(document.getElementById('linesInput').value) || 10;
+            
+            if (!filename) {
+                showStatus('Please select a file', 'error');
+                return;
+            }
+            
+            currentFile = filename;
+            isMonitoring = true;
+            
+            socket.emit('start-tail', { filename, lines });
+            
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            fileSelect.disabled = true;
+            
+            showStatus(`Started monitoring ${filename}`, 'success');
+        }
+        
+        function stopTail() {
+            if (currentFile) {
+                socket.emit('stop-tail', { filename: currentFile });
+            }
+            
+            currentFile = null;
+            isMonitoring = false;
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            fileSelect.disabled = false;
+        }
+        
+        // Initialize
+        refreshFiles();
+    </script>
+</body>
+</html>
